@@ -14,16 +14,17 @@ struct ErrorStatusConverter {
     operator ErrorStatus* () {
         return &error_status;
     }
-    
+
     ~ErrorStatusConverter() noexcept(false) {
         namespace py = pybind11;
-        if (error_status) {
+        if (is_error(error_status)) {
             throw py::value_error(error_status.details);
         }
     }
 
     ErrorStatus error_status;
 };
+
 
 IsDropFrameRate df_enum_converter(py::object& df) {
     if (df.is(py::none())) {
@@ -62,13 +63,13 @@ void opentime_rationalTime_bindings(py::module m) {
         .def_property_readonly("value", &RationalTime::value)
         .def_property_readonly("rate", &RationalTime::rate)
         .def("rescaled_to", (RationalTime (RationalTime::*)(double) const) &RationalTime::rescaled_to,
-             "new_rate"_a)
+             "new_rate"_a, R"docstring(Returns the time value for time converted to new_rate.)docstring")
         .def("rescaled_to", (RationalTime (RationalTime::*)(RationalTime) const) &RationalTime::rescaled_to,
-             "other"_a)
+             "other"_a, R"docstring(Returns the time for time converted to new_rate.)docstring")
         .def("value_rescaled_to", (double (RationalTime::*)(double) const) &RationalTime::value_rescaled_to,
-             "new_rate"_a)
+             "new_rate"_a, R"docstring(Returns the time value for self converted to new_rate.)docstring")
         .def("value_rescaled_to", (double (RationalTime::*)(RationalTime) const) &RationalTime::value_rescaled_to,
-             "other"_a)
+             "other"_a, R"docstring(Returns the time value for self converted to new_rate.)docstring")
         .def("almost_equal", &RationalTime::almost_equal, "other"_a, "delta"_a = 0)
         .def("__copy__", [](RationalTime rt, py::object) {
                 return rt;
@@ -78,31 +79,34 @@ void opentime_rationalTime_bindings(py::module m) {
             }, "copier"_a = py::none())
         .def_static("duration_from_start_end_time", &RationalTime::duration_from_start_end_time,
                     "start_time"_a, "end_time_exclusive"_a)
+        .def_static("duration_from_start_end_time_inclusive", &RationalTime::duration_from_start_end_time_inclusive,
+                    "start_time"_a, "end_time_inclusive"_a)
         .def_static("is_valid_timecode_rate", &RationalTime::is_valid_timecode_rate, "rate"_a)
         .def_static("from_frames", &RationalTime::from_frames, "frame"_a, "rate"_a)
-        .def_static("from_seconds", &RationalTime::from_seconds, "seconds"_a)
+        .def_static("from_seconds", static_cast<RationalTime (*)(double, double)> (&RationalTime::from_seconds), "seconds"_a, "rate"_a)
+        .def_static("from_seconds", static_cast<RationalTime (*)(double)> (&RationalTime::from_seconds), "seconds"_a)
         .def("to_frames", (int (RationalTime::*)() const) &RationalTime::to_frames)
         .def("to_frames", (int (RationalTime::*)(double) const) &RationalTime::to_frames, "rate"_a)
         .def("to_seconds", &RationalTime::to_seconds)
-        .def("to_timecode", [](RationalTime rt, double rate, py::object drop_frame) { 
+        .def("to_timecode", [](RationalTime rt, double rate, py::object drop_frame) {
                 return rt.to_timecode(
-                        rate, 
+                        rate,
                         df_enum_converter(drop_frame),
                         ErrorStatusConverter()
-                ); 
+                );
         }, "rate"_a, "drop_frame"_a)
-        .def("to_timecode", [](RationalTime rt, double rate) { 
+        .def("to_timecode", [](RationalTime rt, double rate) {
                 return rt.to_timecode(
-                        rate, 
+                        rate,
                         IsDropFrameRate::InferFromRate,
                         ErrorStatusConverter()
-                ); 
+                );
         }, "rate"_a)
         .def("to_timecode", [](RationalTime rt) {
                 return rt.to_timecode(
                         rt.rate(),
                         IsDropFrameRate::InferFromRate,
-                        ErrorStatusConverter()); 
+                        ErrorStatusConverter());
                 })
         .def("to_time_string", &RationalTime::to_time_string)
         .def_static("from_timecode", [](std::string s, double rate) {
@@ -137,6 +141,7 @@ void opentime_rationalTime_bindings(py::module m) {
         // The simple "py::self += py::self" returns the original,
         // which is not what we want here: we need this to return a new copy
         // to avoid mutating any additional references, since this class has complete value semantics.
+
         .def("__iadd__", [](RationalTime lhs, RationalTime rhs) {
                 return lhs += rhs;
             });

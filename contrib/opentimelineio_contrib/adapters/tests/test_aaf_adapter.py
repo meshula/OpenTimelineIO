@@ -37,6 +37,50 @@ from opentimelineio_contrib.adapters.aaf_adapter.aaf_writer import (
     AAFValidationError
 )
 
+try:
+    # python2
+    import StringIO as io
+except ImportError:
+    # python3
+    import io
+
+
+TRANSCRIPTION_RESULT = """---
+Transcribing top level mobs
+---
+Creating SerializableCollection for Iterable for list
+  Creating Timeline for SubclipTSVNoData_NoVideo.Exported.02
+    Creating Track for TimelineMobSlot for TimelineMobSlot
+    Creating Track for TimelineMobSlot for TimelineMobSlot
+    Creating Track for TimelineMobSlot for TimelineMobSlot
+    Creating Track for TimelineMobSlot for TimelineMobSlot
+    Creating Track for TimelineMobSlot for TimelineMobSlot
+    Creating Track for TimelineMobSlot for TimelineMobSlot
+    Creating Track for TimelineMobSlot for TimelineMobSlot
+    Creating Track for TimelineMobSlot for TimelineMobSlot
+    Creating Track for TimelineMobSlot for DX
+      Creating Track for Sequence for Sequence
+        Creating operationGroup for OperationGroup
+          Creating SourceClip for Subclip.BREATH (Usage_SubClip)
+          [found child_mastermob]
+          Creating Timeline for subclip
+            Creating Track for TimelineMobSlot for TimelineMobSlot
+              Creating SourceClip for x000-0000_01_Xxxxx_Xxx.aaf
+              [found no mastermob]
+            Creating Track for MobSlot for EventMobSlot
+              Creating Track for Sequence for Sequence
+                Create marker for DescriptiveMarker
+    Creating Track for MobSlot for EventMobSlot
+      Creating Track for Sequence for Sequence
+        Create marker for DescriptiveMarker
+    Creating Track for TimelineMobSlot for TimelineMobSlot
+      Creating Track for Sequence for Sequence
+        Creating Gap for Filler
+    Creating Track for TimelineMobSlot for TimelineMobSlot
+Marker: NEED PDX (time: 360567.0), attached to item: Subclip.BREATH
+"""
+
+
 SAMPLE_DATA_DIR = os.path.join(os.path.dirname(__file__), "sample_data")
 SIMPLE_EXAMPLE_PATH = os.path.join(
     SAMPLE_DATA_DIR,
@@ -154,6 +198,16 @@ COMPOSITION_METADATA_PATH = os.path.join(
     SAMPLE_DATA_DIR,
     "normalclip_sourceclip_references_compositionmob_"
     "with_usercomments_no_mastermob_usercomments.aaf"
+)
+
+MULTIPLE_TIMECODE_OBJECTS_PATH = os.path.join(
+    SAMPLE_DATA_DIR,
+    "multiple_timecode_objects.aaf"
+)
+
+MULTIPLE_MARKERS_PATH = os.path.join(
+    SAMPLE_DATA_DIR,
+    "multiple_markers.aaf"
 )
 
 
@@ -546,7 +600,7 @@ class AAFReaderTests(unittest.TestCase):
     def test_aaf_user_comments(self):
         aaf_path = TRIMS_EXAMPLE_PATH
         timeline = otio.adapters.read_from_file(aaf_path)
-        self.assertTrue(timeline is not None)
+        self.assertIsNotNone(timeline)
         self.assertEqual(type(timeline), otio.schema.Timeline)
         self.assertIsNotNone(timeline.metadata.get("AAF"))
         correctWords = [
@@ -570,10 +624,10 @@ class AAFReaderTests(unittest.TestCase):
 
     def test_aaf_flatten_tracks(self):
         multitrack_timeline = otio.adapters.read_from_file(
-            MULTITRACK_EXAMPLE_PATH
+            MULTITRACK_EXAMPLE_PATH, attach_markers=False
         )
         preflattened_timeline = otio.adapters.read_from_file(
-            PREFLATTENED_EXAMPLE_PATH
+            PREFLATTENED_EXAMPLE_PATH, attach_markers=False
         )
 
         # first make sure we got the structure we expected
@@ -583,7 +637,7 @@ class AAFReaderTests(unittest.TestCase):
 
         self.assertEqual(3, len(multitrack_timeline.video_tracks()))
         self.assertEqual(2, len(multitrack_timeline.audio_tracks()))
-        self.assertEqual(5, len(multitrack_timeline.tracks))
+        self.assertEqual(8, len(multitrack_timeline.tracks))
 
         preflattened = preflattened_timeline.video_tracks()[0]
         self.assertEqual(7, len(preflattened))
@@ -923,6 +977,35 @@ class AAFReaderTests(unittest.TestCase):
 
         self._verify_user_comments(aaf_metadata, expected_md)
 
+    def test_aaf_sourcemob_usage(self):
+        """
+        Each clip stores it's source mob usage AAF value as metadata in`SourceMobUsage`.
+        For sub-clips this value should be `Usage_SubClip`.
+        """
+        # `Usage_SubClip` value
+        subclip_timeline = otio.adapters.read_from_file(SUBCLIP_PATH)
+        subclip_usages = {"Subclip.BREATH": "Usage_SubClip"}
+        for clip in subclip_timeline.each_clip():
+            self.assertEqual(
+                clip.metadata.get("AAF", {}).get("SourceMobUsage"),
+                subclip_usages[clip.name]
+            )
+
+        # no usage value
+        simple_timeline = otio.adapters.read_from_file(SIMPLE_EXAMPLE_PATH)
+        simple_usages = {
+            "KOLL-HD.mp4": "",
+            "brokchrd (loop)-HD.mp4": "",
+            "out-b (loop)-HD.mp4": "",
+            "t-hawk (loop)-HD.mp4": "",
+            "tech.fux (loop)-HD.mp4": ""
+        }
+        for clip in simple_timeline.each_clip():
+            self.assertEqual(
+                clip.metadata.get("AAF", {}).get("SourceMobUsage", ""),
+                simple_usages[clip.name]
+            )
+
     def test_aaf_composition_metadata(self):
         """
         For standard clips the AAF SourceClip can actually reference a
@@ -971,11 +1054,46 @@ class AAFReaderTests(unittest.TestCase):
 
         self._verify_user_comments(aaf_metadata, expected_md)
 
-    def test_aaf_transcribe_log(self):
+    def test_aaf_multiple_timecode_objects(self):
+        """
+        Make sure we can read SourceClips with multiple timecode objects of the
+        same start value and length.
+        """
 
-        # Excercise an aaf-adapter read with transcribe_logging enabled,
-        # for coverage purposes, result is ignored.
+        timeline = otio.adapters.read_from_file(
+            MULTIPLE_TIMECODE_OBJECTS_PATH)
+
+        self.assertIsNotNone(timeline)
+
+        video_track = timeline.video_tracks()[0]
+        only_clip = video_track[0]
+
+        available_range = only_clip.media_reference.available_range
+
+        self.assertEqual(available_range.start_time.value, 86501.0)
+        self.assertEqual(available_range.duration.value, 1981.0)
+
+    def test_aaf_transcribe_log(self):
+        """Excercise an aaf-adapter read with transcribe_logging enabled."""
+
+        # capture output of debugging statements
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+
+        sys.stdout = io.StringIO()
+        sys.stderr = io.StringIO()
         otio.adapters.read_from_file(SUBCLIP_PATH, transcribe_log=True)
+        result_stdout = sys.stdout.getvalue()
+        result_stderr = sys.stderr.getvalue()
+
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+
+        # conform python 2 and 3 behavior
+        result_stdout = result_stdout.replace("b'", "").replace("'", "")
+
+        self.assertEqual(result_stdout, TRANSCRIPTION_RESULT)
+        self.assertEqual(result_stderr, '')
 
     def _verify_user_comments(self, aaf_metadata, expected_md):
 
@@ -988,6 +1106,59 @@ class AAFReaderTests(unittest.TestCase):
         for k, v in expected_md.items():
             self.assertTrue(k in user_comment_keys)
             self.assertEqual(user_comments[k], v)
+
+    def test_attach_markers(self):
+        """Check if markers are correctly translated and attached to the right items.
+        """
+        timeline = otio.adapters.read_from_file(MULTIPLE_MARKERS_PATH,
+                                                attach_markers=True)
+
+        expected_markers = {
+            (1, 'Filler'): [('PUBLISH', 0.0, 1.0, 24.0, 'RED')],
+            (1, 'zts02_1010'): [
+                ('GREEN: V1: zts02_1010: f1104: seq.f1104',
+                 1103.0, 1.0, 24.0, 'GREEN')
+            ],
+            (2, 'ScopeReference'): [
+                ('FX', 0.0, 1.0, 24.0, 'YELLOW'),
+                ('BLUE: V2 (no FX): zts02_1020: f1134: seq.f1327',
+                 518.0, 1.0, 24.0, 'BLUE')
+            ],
+            (3, 'ScopeReference'): [
+                ('INSERT', 0.0, 1.0, 24.0, 'CYAN'),
+                ('CYAN: V3: zts02_1030: f1212: seq.f1665',
+                 856.0,
+                 1.0,
+                 24.0,
+                 'CYAN')
+            ],
+            (4, 'Drop_24.mov'): [
+                ('MAGENTA: V4: zts02_1040: f1001: seq.f1666',
+                 86400.0, 1.0, 24.0, 'MAGENTA')
+            ],
+            (5, 'ScopeReference'): [
+                ('RED: V5: zts02_1050: f1061: seq.f1885',
+                 884.0, 1.0, 24.0, 'RED')
+            ]
+        }
+
+        all_markers = {}
+        for i, track in enumerate(
+                timeline.each_child(descended_from_type=otio.schema.Track)
+        ):
+            for item in track.each_child():
+                markers = [
+                    (
+                        m.name,
+                        m.marked_range.start_time.value,
+                        m.marked_range.duration.value,
+                        m.marked_range.start_time.rate,
+                        m.color
+                    ) for m in item.markers
+                ]
+                if markers:
+                    all_markers[(i, item.name)] = markers
+        self.assertEqual(all_markers, expected_markers)
 
 
 class AAFWriterTests(unittest.TestCase):

@@ -177,6 +177,93 @@ Serializes an OpenTimelineIO object into a string
 
 
 
+### otiod
+
+```
+OTIOD adapter - bundles otio files linked to local media in a directory
+
+Takes as input an OTIO file that has media references which are all
+ExternalReferences with target_urls to files with unique basenames that are
+accessible through the file system and bundles those files and the otio file
+into a single directory named with a suffix of .otiod.
+```
+
+*source*: `opentimelineio/adapters/otiod.py`
+
+
+*Supported Features (with arguments)*:
+
+- read_from_file:
+  - filepath
+  - absolute_media_reference_paths
+- write_to_file:
+  - input_otio
+  - filepath
+  - media_policy
+  - dryrun
+
+
+
+
+
+### otioz
+
+```
+OTIOZ adapter - bundles otio files linked to local media
+
+Takes as input an OTIO file that has media references which are all
+ExternalReferences with target_urls to files with unique basenames that are
+accessible through the file system and bundles those files and the otio file
+into a single zip file with the suffix .otioz.  Can error out if files aren't
+locally referenced or provide missing references
+
+Can also extract the content.otio file from an otioz bundle for processing.
+
+Note that OTIOZ files _always_ use the unix style path separator ('/'). This
+ensures that regardless of which platform a bundle was created on, it can be
+read on unix and windows platforms.
+```
+
+*source*: `opentimelineio/adapters/otioz.py`
+
+
+*Supported Features (with arguments)*:
+
+- read_from_file:
+  - filepath
+  - extract_to_directory
+- write_to_file:
+  - input_otio
+  - filepath
+  - media_policy
+  - dryrun
+
+
+
+
+
+### svg
+
+```
+OTIO to SVG Adapter
+Points in calculations are y-up.
+Points in SVG are y-down.
+```
+
+*source*: `opentimelineio/adapters/svg.py`
+
+
+*Supported Features (with arguments)*:
+
+- write_to_string:
+  - input_otio
+  - width
+  - height
+
+
+
+
+
 ## Media Linkers
 
 Media Linkers run after the adapter has read in the file and convert the media
@@ -246,10 +333,27 @@ Depending on if/where PyAAF is installed, you may need to set this env var:
 
 *Supported Features (with arguments)*:
 
-- read_from_file:
+- read_from_file: 
+```
+Reads AAF content from `filepath` and outputs an OTIO
+  timeline object.
+
+  Args:
+      filepath (str): AAF filepath
+      simplify (bool, optional): simplify timeline structure by stripping empty
+  items
+      transcribe_log (bool, optional): log activity as items are getting
+  transcribed
+      attach_markers (bool, optional): attaches markers to their appropriate items
+                                       like clip, gap. etc on the track
+
+  Returns:
+      otio.schema.Timeline
+```
   - filepath
   - simplify
   - transcribe_log
+  - attach_markers
 - write_to_file:
   - input_otio
   - filepath

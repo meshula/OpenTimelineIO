@@ -7,6 +7,7 @@
 #include "opentime/timeTransform.h"
 #include "opentimelineio/serializableObject.h"
 #include "opentimelineio/safely_typed_any.h"
+#include "opentimelineio/stringUtils.h"
 
 #include <map>
 #include <cstring>
@@ -39,6 +40,11 @@ py::object plain_int(int64_t i) {
     return py::reinterpret_steal<py::object>(p);
 }
 
+py::object plain_uint(uint64_t i) {
+    PyObject *p = PyLong_FromUnsignedLongLong(i);
+    return py::reinterpret_steal<py::object>(p);
+}
+
 void _build_any_to_py_dispatch_table() {
     auto& t = _py_cast_dispatch_table;
 
@@ -46,6 +52,7 @@ void _build_any_to_py_dispatch_table() {
     t[&typeid(bool)] = [](any const& a, bool) { return py::cast(safely_cast_bool_any(a)); };
     t[&typeid(int)] = [](any const& a, bool) {  return plain_int(safely_cast_int_any(a)); };
     t[&typeid(int64_t)] = [](any const& a, bool) {  return plain_int(safely_cast_int64_any(a)); };
+    t[&typeid(uint64_t)] = [](any const& a, bool) {  return plain_uint(safely_cast_uint64_any(a)); };
     t[&typeid(double)] = [](any const& a, bool) { return py::cast(safely_cast_double_any(a)); };
     t[&typeid(std::string)] = [](any const& a, bool) { return py::cast(safely_cast_string_any(a)); };
     t[&typeid(RationalTime)] = [](any const& a, bool) { return py::cast(safely_cast_rational_time_any(a)); };
@@ -105,7 +112,7 @@ AnyDictionary py_to_any_dictionary(py::object const& o) {
     py_to_any(o, &a);
     if (!compare_typeids(a.type(), typeid(AnyDictionary))) {
         throw py::type_error(string_printf("expected an AnyDictionary (i.e. metadata); got %s instead",
-                                           demangled_type_name(a).c_str()));
+                                           type_name_for_error_message(a).c_str()));
     }
 
     return safely_cast_any_dictionary_any(a);
@@ -153,7 +160,7 @@ py::object any_to_py(any const& a, bool top_level) {
 
     if (e == _py_cast_dispatch_table.end()) {
         throw py::value_error(string_printf("Unable to cast any of type %s to python object",
-                                            demangled_type_name(tInfo).c_str()));
+                                            type_name_for_error_message(tInfo).c_str()));
     }
 
     return e->second(a, top_level);

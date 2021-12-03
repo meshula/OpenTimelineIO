@@ -106,7 +106,7 @@ class ImageSequenceReferenceTests(
             'frame_step=3, '
             'rate=30.0, '
             'frame_zero_padding=5, '
-            'missing_frame_policy=MissingFramePolicy.error, '
+            'missing_frame_policy=<MissingFramePolicy.error: 0>, '
             'available_range={}, '
             "metadata={{'custom': {{'foo': 'bar'}}}}"
             ')'.format(repr(ref.available_range))
@@ -611,3 +611,87 @@ class ImageSequenceReferenceTests(
                 ref.target_url_for_image_number(i),
                 "file:///show/seq/shot/rndr/show_shot.{:04}.exr".format(i - 1),
             )
+
+    def test_target_url_for_image_number_with_missing_timing_info(self):
+        ref = otio.schema.ImageSequenceReference(
+            "file:///show/seq/shot/rndr/",
+            "show_shot.",
+            ".exr",
+            frame_zero_padding=4,
+            start_frame=1,
+            frame_step=1,
+            rate=24,
+        )
+
+        # Make sure the right error and a useful message raised when
+        # source_range is either un-set or zero duration.
+        with self.assertRaises(IndexError) as exception_manager:
+            ref.target_url_for_image_number(0)
+
+        self.assertEqual(
+            str(exception_manager.exception),
+            "Zero duration sequences has no frames.",
+        )
+
+        ref.available_range = otio.opentime.TimeRange(
+            otio.opentime.RationalTime(12, 24),
+            otio.opentime.RationalTime(0, 1),
+        )
+
+        with self.assertRaises(IndexError) as exception_manager:
+            ref.target_url_for_image_number(0)
+
+        self.assertEqual(
+            str(exception_manager.exception),
+            "Zero duration sequences has no frames.",
+        )
+
+        # Set the duration and make sure a similarly useful message comes
+        # when rate is un-set.
+        ref.available_range = otio.opentime.TimeRange(
+            otio.opentime.RationalTime(12, 24),
+            otio.opentime.RationalTime(48, 24),
+        )
+        ref.rate = 0
+
+        with self.assertRaises(IndexError) as exception_manager:
+            ref.target_url_for_image_number(0)
+
+        self.assertEqual(
+            str(exception_manager.exception),
+            "Zero rate sequence has no frames.",
+        )
+
+    def test_clone(self):
+        """ ensure that deeopcopy/clone function """
+        isr = otio.schema.ImageSequenceReference()
+
+        try:
+            import copy
+            cln = copy.deepcopy(isr)
+            cln = isr.clone()
+        except ValueError as exc:
+            self.fail("Cloning raised an exception: {}".format(exc))
+
+        self.assertJsonEqual(isr, cln)
+
+    def test_target_url_for_image_number_with_blank_target_url_base(self):
+        ref = otio.schema.ImageSequenceReference(
+            name_prefix="myfilename.",
+            name_suffix=".exr",
+            start_frame=101,
+            rate=24,
+            frame_zero_padding=4,
+            available_range=otio.opentime.TimeRange(
+                otio.opentime.from_timecode("01:25:30:04", rate=24),
+                duration=otio.opentime.from_frames(48, 24)
+            ),
+        )
+
+        self.assertEqual(
+            ref.target_url_for_image_number(0), "myfilename.0101.exr"
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

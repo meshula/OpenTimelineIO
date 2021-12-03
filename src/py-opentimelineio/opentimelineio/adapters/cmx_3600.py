@@ -268,6 +268,7 @@ class EDLParser(object):
         if transition not in ['C']:
             md = clip_handler.clip.metadata.setdefault("cmx_3600", {})
             md["transition"] = transition
+            md["transition_duration"] = float(data)
 
     def parse_edl(self, edl_string, rate=24):
         # edl 'events' can be comprised of an indeterminate amount of lines
@@ -359,6 +360,10 @@ class EDLParser(object):
 
 
 class ClipHandler(object):
+    # /path/filename.[1001-1020].ext
+    image_sequence_pattern = re.compile(
+        r'.*\.(?P<range>\[(?P<start>[0-9]+)-(?P<end>[0-9]+)\])\.\w+$'
+    )
 
     def __init__(self, line, comment_data, rate=24):
         self.clip_num = None
@@ -374,6 +379,33 @@ class ClipHandler(object):
 
         self.parse(line)
         self.clip = self.make_clip(comment_data)
+
+    def is_image_sequence(self, comment_data):
+        return self.image_sequence_pattern.search(
+            comment_data['media_reference']
+        ) is not None
+
+    def create_imagesequence_reference(self, comment_data):
+        regex_obj = self.image_sequence_pattern.search(
+            comment_data['media_reference']
+        )
+
+        path, basename = os.path.split(comment_data['media_reference'])
+        prefix, suffix = basename.split(regex_obj.group('range'))
+        ref = schema.ImageSequenceReference(
+            target_url_base=path,
+            name_prefix=prefix,
+            name_suffix=suffix,
+            rate=self.edl_rate,
+            start_frame=int(regex_obj.group('start')),
+            frame_zero_padding=len(regex_obj.group('start')),
+            available_range=opentime.range_from_start_end_time(
+                opentime.from_timecode(self.source_tc_in, self.edl_rate),
+                opentime.from_timecode(self.source_tc_out, self.edl_rate)
+            )
+        )
+
+        return ref
 
     def make_clip(self, comment_data):
         clip = schema.Clip()
@@ -391,10 +423,15 @@ class ClipHandler(object):
             # TODO: Replace with enum, once one exists
             clip.media_reference.generator_kind = 'SMPTEBars'
         elif 'media_reference' in comment_data:
-            clip.media_reference = schema.ExternalReference()
-            clip.media_reference.target_url = comment_data[
-                'media_reference'
-            ]
+            if self.is_image_sequence(comment_data):
+                clip.media_reference = self.create_imagesequence_reference(
+                    comment_data
+                )
+            else:
+                clip.media_reference = schema.ExternalReference()
+                clip.media_reference.target_url = comment_data[
+                    'media_reference'
+                ]
         else:
             clip.media_reference = schema.MissingReference()
 
@@ -410,6 +447,15 @@ class ClipHandler(object):
         ):
             clip.name = os.path.splitext(
                 os.path.basename(clip.media_reference.target_url)
+            )[0]
+
+        elif (
+            clip.media_reference and
+            hasattr(clip.media_reference, 'target_url_base') and
+            clip.media_reference.target_url_base is not None
+        ):
+            clip.name = os.path.splitext(
+                os.path.basename(_get_image_sequence_url(clip))
             )[0]
 
         asc_sop = comment_data.get('asc_sop', None)
@@ -626,6 +672,16 @@ class CommentHandler(object):
                 self.unhandled.append(stripped)
 
 
+def _get_next_clip(start_index, track):
+    """Get the next clip with a non-zero duration"""
+    # Iterate over the following clips and return the first "real" one
+    for clip in track[start_index + 1:]:
+        if clip.duration().value > 0:
+            return clip
+
+    return None
+
+
 def _expand_transitions(timeline):
     """Convert clips with metadata/transition == 'D' into OTIO transitions."""
 
@@ -634,13 +690,10 @@ def _expand_transitions(timeline):
     replace_or_insert_list = []
     append_list = []
     for track in tracks:
-        track_iter = iter(track)
         # avid inserts an extra clip for the source
         prev_prev = None
         prev = None
-        clip = next(track_iter, None)
-        next_clip = next(track_iter, None)
-        while clip is not None:
+        for index, clip in enumerate(track):
             transition_type = clip.metadata.get('cmx_3600', {}).get(
                 'transition',
                 'C'
@@ -650,16 +703,31 @@ def _expand_transitions(timeline):
                 # nothing to do, continue to the next iteration of the loop
                 prev_prev = prev
                 prev = clip
-                clip = next_clip
-                next_clip = next(track_iter, None)
                 continue
-            if transition_type not in ['D']:
+
+            wipe_match = re.match(r'W(\d{3})', transition_type)
+            if wipe_match is not None:
+                otio_transition_type = "SMPTE_Wipe"
+            elif transition_type in ['D']:
+                otio_transition_type = schema.TransitionTypes.SMPTE_Dissolve
+            else:
                 raise EDLParseError(
                     "Transition type '{}' not supported by the CMX EDL reader "
                     "currently.".format(transition_type)
                 )
 
-            transition_duration = clip.duration()
+            # Using transition data for duration (with clip duration as backup.)
+            # Link: https://ieeexplore.ieee.org/document/7291839
+            # Citation: "ST 258:2004 - SMPTE Standard - For Television - Transfer
+            #   of Edit Decision Lists," in ST 258:2004 , vol., no., pp.1-37,
+            #   6 April 2004, doi: 10.5594/SMPTE.ST258.2004.
+            if clip.metadata.get("cmx_3600", {}).get("transition_duration"):
+                transition_duration = opentime.RationalTime(
+                    clip.metadata["cmx_3600"]["transition_duration"],
+                    clip.duration().rate
+                )
+            else:
+                transition_duration = clip.duration()
 
             # EDL doesn't have enough data to know where the cut point was, so
             # this arbitrarily puts it in the middle of the transition
@@ -704,14 +772,15 @@ def _expand_transitions(timeline):
             new_trx = schema.Transition(
                 name=clip.name,
                 # only supported type at the moment
-                transition_type=schema.TransitionTypes.SMPTE_Dissolve,
-                metadata=clip.metadata
+                transition_type=otio_transition_type,
+                metadata=clip.metadata,
             )
             new_trx.in_offset = mid_tran_cut_pre_duration
             new_trx.out_offset = mid_tran_cut_post_duration
 
             # expand the next_clip or contract this clip
             keep_transition_clip = False
+            next_clip = _get_next_clip(index, track)
             if next_clip:
                 if _transition_clips_continuous(clip, next_clip):
                     sr = next_clip.source_range
@@ -753,8 +822,6 @@ def _expand_transitions(timeline):
                 del(new_trx.metadata['previous_metadata'])
 
             prev = clip
-            clip = next_clip
-            next_clip = next(track_iter, None)
 
     for (insert, track, from_clip, to_transition) in replace_or_insert_list:
         clip_index = track.index(from_clip)
@@ -1273,6 +1340,9 @@ def _generate_comment_lines(
         if hasattr(clip.media_reference, 'target_url'):
             url = clip.media_reference.target_url
 
+        elif hasattr(clip.media_reference, 'abstract_target_url'):
+            url = _get_image_sequence_url(clip)
+
     else:
         url = clip.name
 
@@ -1368,6 +1438,22 @@ def _generate_comment_lines(
     return lines
 
 
+def _get_image_sequence_url(clip):
+    ref = clip.media_reference
+    start_frame, end_frame = ref.frame_range_for_time_range(
+        clip.trimmed_range()
+    )
+
+    frame_range_str = '[{start}-{end}]'.format(
+        start=start_frame,
+        end=end_frame
+    )
+
+    url = clip.media_reference.abstract_target_url(frame_range_str)
+
+    return url
+
+
 def _flip_windows_slashes(path):
     return re.sub(r'\\', '/', path)
 
@@ -1381,10 +1467,18 @@ def _reel_from_clip(clip, reelname_len):
 
     _reel = clip.name or 'AX'
 
-    if isinstance(clip.media_reference, schema.ExternalReference):
-        _reel = clip.media_reference.name or os.path.basename(
-            clip.media_reference.target_url
-        )
+    valid_refs = (schema.ExternalReference, schema.ImageSequenceReference)
+    if isinstance(clip.media_reference, valid_refs):
+        if clip.media_reference.name:
+            _reel = clip.media_reference.name
+
+        elif hasattr(clip.media_reference, 'target_url'):
+            _reel = os.path.basename(
+                clip.media_reference.target_url
+            )
+
+        else:
+            _reel = _get_image_sequence_url(clip)
 
     # Flip Windows slashes
     _reel = os.path.basename(_flip_windows_slashes(_reel))

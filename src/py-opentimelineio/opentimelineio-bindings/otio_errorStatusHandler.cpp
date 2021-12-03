@@ -25,15 +25,15 @@ struct _CannotComputeAvailableRangeException : public OTIOException {
 };
 
 ErrorStatusHandler::~ErrorStatusHandler() noexcept(false) {
-    if (!error_status) {
+    if (!is_error(error_status)) {
         return;
     }
-    
+
     switch(error_status.outcome) {
     case ErrorStatus::NOT_IMPLEMENTED:
-        throw py::not_implemented_error();
+        throw py::not_implemented_error(error_status.details);
     case ErrorStatus::ILLEGAL_INDEX:
-        throw py::index_error();
+        throw py::index_error(error_status.details);
     case ErrorStatus::KEY_NOT_FOUND:
         throw py::key_error(error_status.details);
     case ErrorStatus::INTERNAL_ERROR:
@@ -58,6 +58,8 @@ ErrorStatusHandler::~ErrorStatusHandler() noexcept(false) {
         throw _NotAChildException(full_details());
     case ErrorStatus::CANNOT_COMPUTE_AVAILABLE_RANGE:
         throw _CannotComputeAvailableRangeException(full_details());
+    case ErrorStatus::OBJECT_CYCLE:
+        throw py::value_error("Detected SerializableObject cycle while copying/serializing: " + details());
     default:
         throw py::value_error(full_details());
     }
