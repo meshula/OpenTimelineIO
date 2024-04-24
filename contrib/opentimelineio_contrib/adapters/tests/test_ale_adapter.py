@@ -60,6 +60,7 @@ class ALEAdapterTest(unittest.TestCase):
         self.assertEqual(len(collection), 2)
         fps = float(collection.metadata.get("ALE").get("header").get("FPS"))
         self.assertEqual(fps, 23.98)
+        real_fps = otio.opentime.RationalTime.nearest_smpte_timecode_rate(fps)
         self.assertEqual(
             [c.name for c in collection],
             ["19A-1xa", "19A-2xa"]
@@ -68,12 +69,12 @@ class ALEAdapterTest(unittest.TestCase):
             [c.source_range for c in collection],
             [
                 otio.opentime.TimeRange(
-                    otio.opentime.from_timecode("04:00:00:00", fps),
-                    otio.opentime.from_timecode("00:00:46:16", fps)
+                    otio.opentime.from_timecode("04:00:00:00", real_fps),
+                    otio.opentime.from_timecode("00:00:46:16", real_fps)
                 ),
                 otio.opentime.TimeRange(
-                    otio.opentime.from_timecode("04:00:46:16", fps),
-                    otio.opentime.from_timecode("00:00:50:16", fps)
+                    otio.opentime.from_timecode("04:00:46:16", real_fps),
+                    otio.opentime.from_timecode("00:00:50:16", real_fps)
                 )
             ]
         )
@@ -86,6 +87,7 @@ class ALEAdapterTest(unittest.TestCase):
         self.assertEqual(len(collection), 4)
         fps = float(collection.metadata.get("ALE").get("header").get("FPS"))
         self.assertEqual(fps, 23.976)
+        real_fps = otio.opentime.RationalTime.nearest_smpte_timecode_rate(fps)
         self.assertEqual([c.name for c in collection], [
             "A005_C010_0501J0", "A005_C010_0501J0", "A005_C009_0501A0",
             "A005_C010_0501J0"
@@ -93,20 +95,20 @@ class ALEAdapterTest(unittest.TestCase):
         self.assertEqual([c.source_range for c in collection], [
 
             otio.opentime.TimeRange(
-                otio.opentime.from_timecode("17:49:33:01", fps),
-                otio.opentime.from_timecode("00:00:02:09", fps)),
+                otio.opentime.from_timecode("17:49:33:01", real_fps),
+                otio.opentime.from_timecode("00:00:02:09", real_fps)),
 
             otio.opentime.TimeRange(
-                otio.opentime.from_timecode("17:49:55:19", fps),
-                otio.opentime.from_timecode("00:00:06:09", fps)),
+                otio.opentime.from_timecode("17:49:55:19", real_fps),
+                otio.opentime.from_timecode("00:00:06:09", real_fps)),
 
             otio.opentime.TimeRange(
-                otio.opentime.from_timecode("17:40:25:06", fps),
-                otio.opentime.from_timecode("00:00:02:20", fps)),
+                otio.opentime.from_timecode("17:40:25:06", real_fps),
+                otio.opentime.from_timecode("00:00:02:20", real_fps)),
 
             otio.opentime.TimeRange(
-                otio.opentime.from_timecode("17:50:21:23", fps),
-                otio.opentime.from_timecode("00:00:03:14", fps))
+                otio.opentime.from_timecode("17:50:21:23", real_fps),
+                otio.opentime.from_timecode("00:00:03:14", real_fps))
         ])
 
         # Slope, offset, and power values are of type _otio.AnyVector
@@ -175,8 +177,8 @@ class ALEAdapterTest(unittest.TestCase):
             cl = otio.schema.Clip(
                 metadata={'ALE': {'Image Size': size}},
                 source_range=otio.opentime.TimeRange(
-                    start_time=otio.opentime.RationalTime(0, 23.976),
-                    duration=otio.opentime.RationalTime(48, 23.976)
+                    start_time=otio.opentime.RationalTime(0, 24000/1001),
+                    duration=otio.opentime.RationalTime(48, 24000/1001)
                 )
             )
             timeline.tracks[0].extend([cl])
