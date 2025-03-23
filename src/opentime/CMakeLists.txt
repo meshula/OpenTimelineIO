@@ -18,6 +18,8 @@ add_library(OTIO::opentime ALIAS opentime)
 
 target_include_directories(opentime PRIVATE "${PROJECT_SOURCE_DIR}/src")
 
+target_link_libraries(opentime PUBLIC Imath::Imath)
+
 set_target_properties(opentime PROPERTIES 
     DEBUG_POSTFIX "${OTIO_DEBUG_POSTFIX}"
     LIBRARY_OUTPUT_NAME "opentime"
